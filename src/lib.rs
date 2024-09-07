@@ -25,7 +25,7 @@ extern crate alloc;
 use alloc::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 
 use core::{
-    mem::{align_of, size_of},
+    mem::{align_of, size_of, ManuallyDrop},
     ptr::{self, NonNull},
 };
 
@@ -112,7 +112,7 @@ impl ThinStr {
         let bufstart = szp.add(1).cast::<u8>();
         initializer(bufstart);
 
-        debug_assert_eq!((*ptr.as_ptr()).data.as_ptr() as usize, bufstart as usize);
+        debug_assert_eq!((*ptr.as_ptr()).data.as_ptr(), bufstart);
 
         ThinStr(ptr)
     }
@@ -174,6 +174,35 @@ impl ThinStr {
     #[inline]
     fn data_ptr_mut(&mut self) -> *mut u8 {
         unsafe { (self.0.as_ptr() as *mut u8).add(size_of::<usize>()) }
+    }
+
+    #[inline]
+    fn header_from_data_ptr(ptr: *mut u8) -> *mut ThinHeader {
+        unsafe { ptr.sub(size_of::<usize>()).cast() }
+    }
+
+    /// Consumes the `ThinStr`, returning the wrapped pointer.
+    ///
+    /// To avoid a memory leak the pointer must be converted back to a `ThinStr`
+    /// using [`ThinStr::from_raw`].
+    pub fn into_raw(self) -> *mut u8 {
+        ManuallyDrop::new(self).data_ptr_mut()
+    }
+    
+    /// Constructs a `ThinStr` from a raw pointer.
+    /// 
+    /// # Safety
+    ///
+    /// The raw pointer must have been previously returned by a call to
+    /// [`ThinStr::into_raw`].
+    ///
+    /// The user of `from_raw` has to make sure a specific `ThinStr` instance is
+    /// only dropped once.
+    ///
+    /// This function is unsafe because improper use may lead to memory unsafety,
+    /// even if the returned `ThinStr` is never accessed.
+    pub unsafe fn from_raw(ptr: *mut u8) -> Self {
+        Self(NonNull::new_unchecked(Self::header_from_data_ptr(ptr)))
     }
 
     /// Access the string's byte array.
@@ -535,5 +564,17 @@ mod test {
 
         let s = ThinStr::from(alloc::string::String::from("abcd43211234"));
         assert_tokens(&s, &[Token::Str("abcd43211234")]);
+    }
+
+    #[test]
+    fn test_raw() {
+        let s = ThinStr::from("Hello, world!");
+        let data_ptr = s.data_ptr();
+        let str_ptr = s.as_ptr();
+        let raw = s.into_raw();
+        assert_eq!(str_ptr, raw);
+        let new_s = unsafe { ThinStr::from_raw(raw) };
+        assert_eq!(data_ptr, new_s.data_ptr());
+        assert_eq!(str_ptr, new_s.as_ptr());
     }
 }
