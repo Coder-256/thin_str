@@ -188,6 +188,18 @@ impl ThinStr {
     pub fn into_raw(self) -> *mut u8 {
         ManuallyDrop::new(self).data_ptr_mut()
     }
+
+    /// Get the length of the `ThinStr` from a raw pointer.
+    /// 
+    /// # Safety
+    /// 
+    /// The raw pointer must have been previously returned by a call to
+    /// [`ThinStr::into_raw`].
+    ///
+    /// This function is unsafe because improper use may lead to memory unsafety.
+    pub unsafe fn len_raw(ptr: *mut u8) -> usize {
+        unsafe { &*Self::header_from_data_ptr(ptr) }.len
+    }
     
     /// Constructs a `ThinStr` from a raw pointer.
     /// 
@@ -571,10 +583,12 @@ mod test {
         let s = ThinStr::from("Hello, world!");
         let data_ptr = s.data_ptr();
         let str_ptr = s.as_ptr();
+        let len = s.len();
         let raw = s.into_raw();
-        assert_eq!(str_ptr, raw);
+        assert_eq!(raw.cast_const(), str_ptr);
         let new_s = unsafe { ThinStr::from_raw(raw) };
-        assert_eq!(data_ptr, new_s.data_ptr());
-        assert_eq!(str_ptr, new_s.as_ptr());
+        assert_eq!(new_s.data_ptr(), data_ptr);
+        assert_eq!(new_s.as_ptr(), str_ptr);
+        assert_eq!(new_s.len(), len);
     }
 }
